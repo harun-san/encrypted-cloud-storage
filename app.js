@@ -55,7 +55,6 @@ async function checkUser() {
     authSection.classList.add("hidden");
     uploadSection.classList.remove("hidden");
     userEmail.textContent = "Login sebagai: " + data.user.email;
-    // isi daftar file user
     await listUserFiles(data.user.id);
   } else {
     authSection.classList.remove("hidden");
@@ -86,59 +85,37 @@ uploadBtn.addEventListener("click", async () => {
   const reader = new FileReader();
   reader.onload = async (e) => {
     try {
-      // --- Buat WordArray dari ArrayBuffer (biner) ---
       const u8 = new Uint8Array(e.target.result);
       const wordArray = CryptoJS.lib.WordArray.create(u8);
-
-      // --- Enkripsi (hasilnya Base64 string) ---
       const encryptedBase64 = CryptoJS.AES.encrypt(wordArray, key).toString();
-
-      // --- Jadikan binary dari base64 agar upload sebagai file biner (.enc) ---
       const encryptedUint8 = base64ToUint8Array(encryptedBase64);
       const blob = new Blob([encryptedUint8], { type: "application/octet-stream" });
-
-      // --- Path disimpan di folder user.id supaya tiap user punya folder sendiri ---
       const filePath = `${userData.user.id}/${file.name}.enc`;
 
-      // Upload ke Supabase Storage (bucket "secure-files")
       const { error: uploadError } = await supabase.storage
         .from("secure-files")
         .upload(filePath, blob, { upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // Usahakan pakai signed URL agar private (jika bucket private). 
-      // Kita minta signed URL yang valid 1 jam (3600 detik)
+      // Tampilkan link hasil upload sementara (opsional)
       const { data: signedData, error: signedError } = await supabase.storage
         .from("secure-files")
         .createSignedUrl(filePath, 3600);
 
-      let publicHref = "";
-      if (signedError || !signedData?.signedUrl) {
-        // fallback: getPublicUrl (jika bucket publik)
-        const { data: pu, error: puErr } = supabase.storage.from("secure-files").getPublicUrl(filePath);
-        if (puErr) throw puErr;
-        publicHref = pu.publicUrl;
-      } else {
-        publicHref = signedData.signedUrl;
-      }
-
-      // Tampilkan link hasil upload
+      let publicHref = signedData?.signedUrl || "";
       downloadLink.textContent = file.name + ".enc";
       downloadLink.href = publicHref;
-      // agar browser mengunduh file (bukan membuka dalam tab), set attribute download
       downloadLink.setAttribute("download", file.name + ".enc");
       output.classList.remove("hidden");
 
       alert("File terenkripsi dan berhasil diupload!");
-      // refresh daftar file
-      await listUserFiles(userData.user.id);
+      await listUserFiles(userData.user.id); // refresh daftar file otomatis
     } catch (err) {
       alert("Gagal upload: " + (err.message || JSON.stringify(err)));
       console.error(err);
     }
   };
-  // baca sebagai ArrayBuffer supaya kita dapat biner asli
   reader.readAsArrayBuffer(file);
 });
 
@@ -146,7 +123,6 @@ uploadBtn.addEventListener("click", async () => {
 async function listUserFiles(userId) {
   fileList.innerHTML = "<p>Memuat daftar file...</p>";
   try {
-    // list semua object dalam folder userId
     const { data, error } = await supabase.storage
       .from("secure-files")
       .list(userId, { limit: 200, offset: 0, sortBy: { column: "name", order: "asc" } });
@@ -158,7 +134,6 @@ async function listUserFiles(userId) {
       return;
     }
 
-    // buat elemen list
     fileList.innerHTML = "";
     data.forEach((file) => {
       const row = document.createElement("div");
@@ -171,7 +146,7 @@ async function listUserFiles(userId) {
       const btnDownload = document.createElement("button");
       btnDownload.textContent = "Download";
       btnDownload.className = "file-download-btn";
-      btnDownload.addEventListener("click", () => downloadEncryptedFile(`${userId}/${file.name}`, file.name));
+      btnDownload.addEventListener("click", () => downloadDecryptedFile(`${userId}/${file.name}`, file.name));
 
       row.appendChild(name);
       row.appendChild(btnDownload);
@@ -183,33 +158,43 @@ async function listUserFiles(userId) {
   }
 }
 
-// === DOWNLOAD: buat signed URL lalu buka / download ===
-async function downloadEncryptedFile(path, filename) {
-  try {
-    // Mencoba bikin signed URL (lebih aman) — expire 300 detik (5 menit)
-    const { data: signedData, error: signedError } = await supabase.storage
-      .from("secure-files")
-      .createSignedUrl(path, 300);
+// === DOWNLOAD & DEKRIPSI FILE ===
+async function downloadDecryptedFile(path, filename) {
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) return alert("Harus login dulu!");
 
-    let url = "";
-    if (signedError || !signedData?.signedUrl) {
-      // fallback: public url
-      const { data: pu, error: puErr } = supabase.storage.from("secure-files").getPublicUrl(path);
-      if (puErr) throw puErr;
-      url = pu.publicUrl;
-    } else {
-      url = signedData.signedUrl;
+  const key = prompt("Masukkan kunci enkripsi untuk mendekripsi file:"); 
+  if (!key) return alert("Kunci tidak boleh kosong!");
+
+  try {
+    const { data: fileBlob, error } = await supabase.storage
+      .from("secure-files")
+      .download(path);
+    if (error) throw error;
+
+    const arrayBuffer = await fileBlob.arrayBuffer();
+    const u8 = new Uint8Array(arrayBuffer);
+    const wordArray = CryptoJS.lib.WordArray.create(u8);
+
+    // dekripsi
+    const decrypted = CryptoJS.AES.decrypt({ ciphertext: wordArray }, key);
+
+    const decryptedBytes = new Uint8Array(decrypted.sigBytes);
+    for (let i = 0; i < decrypted.sigBytes; i++) {
+      decryptedBytes[i] = decrypted.words[i >>> 2] >>> (24 - (i % 4) * 8) & 0xff;
     }
 
-    // Buat link sementara untuk mendownload
+    const decryptedBlob = new Blob([decryptedBytes], { type: "application/octet-stream" });
     const a = document.createElement("a");
-    a.href = url;
-    a.download = filename; // akan minta browser mengunduh
+    a.href = URL.createObjectURL(decryptedBlob);
+    a.download = filename.replace(/\.enc$/, "");
     document.body.appendChild(a);
     a.click();
     a.remove();
+    URL.revokeObjectURL(a.href);
+
   } catch (err) {
-    alert("Gagal membuat link download: " + (err.message || JSON.stringify(err)));
+    alert("Gagal download atau dekripsi: " + (err.message || JSON.stringify(err)));
     console.error(err);
   }
 }
