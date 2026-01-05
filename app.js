@@ -1,8 +1,8 @@
 // === KONEKSI KE SUPABASE ===
 const { createClient } = window.supabase;
 const supabase = createClient(
-  "https://gdcunyctbofxewtxokrg.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkY3VueWN0Ym9meGV3dHhva3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI3ODk4NjYsImV4cCI6MjA3ODM2NTg2Nn0.9SfCpJxx8HByLSJ3BsJ1FjwkzY3jnOxhIcLuUm_IkPI"
+  "https://ghxmmdfpfsljqxuosusg.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdoeG1tZGZwZnNsanF4dW9zdXNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc2MTY0ODAsImV4cCI6MjA4MzE5MjQ4MH0.c6YDawbf9rwggJTlrfP8ZLWzyf4hxomGdbTZ_Ms3deY"
 );
 
 const CryptoJS = window.CryptoJS;
@@ -360,3 +360,4 @@ async function downloadDecryptedFile(path, filename) {
     alert("Gagal download atau dekripsi: " + (err.message || JSON.stringify(err)));
   }
 }
+
